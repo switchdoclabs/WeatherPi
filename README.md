@@ -16,5 +16,5 @@ http://www.switchdoc.com/
 
 March 28, 2015 - added subdirectories
 May 9, 2015 - Updated software for WatchDog Timer and Email
-
+May 10, 2015 - Added mysql table SQL files for database building 
 
