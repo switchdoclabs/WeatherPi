@@ -742,8 +742,9 @@ def patTheDog():
 def shutdownPi(why):
 
    pclogging.log(pclogging.INFO, __name__, "Pi Shutting Down: %s" % why)
-   sendemail.sendEmail("test", "WeatherPi Shuttding down:"+ why, "The WeatherPi Raspberry Pi shutting down.", conf.notifyAddress,  conf.fromAddress, "");
-   time.sleep(5.0)
+   sendemail.sendEmail("test", "WeatherPi Shutting down:"+ why, "The WeatherPi Raspberry Pi shutting down.", conf.notifyAddress,  conf.fromAddress, "");
+   sys.stdout.flush()
+   time.sleep(10.0)
 
    os.system("sudo shutdown -h now")
 
@@ -823,7 +824,9 @@ while True:
 
 	if ((secondCount % (15*60)) == 0):
 		# print every 900 seconds
-		sampleAndDisplay()		
+                sampleWeather()
+                sampleSunAirPlus()
+		doAllGraphs.doAllGraphs()
 
 
 
