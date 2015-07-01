@@ -143,11 +143,18 @@ bmp180 = BMP180.BMP085()
 
 # ad3935 Set up Lightning Detector
 
+# turn I2CBus 2 on
+tca9545.write_control_register(TCA9545_CONFIG_BUS2)
+time.sleep(0.003)
+#tca9545.write_control_register(TCA9545_CONFIG_BUS0)
+#time.sleep(0.003)
+
 as3935 = RPi_AS3935(address=0x03, bus=1)
 
-as3935.set_indoors(True)
+as3935.set_indoors(False)
 as3935.set_noise_floor(0)
-as3935.calibrate(tun_cap=0x0F)
+#as3935.calibrate(tun_cap=0x0F)
+as3935.calibrate(tun_cap=0x05)
 
 as3935LastInterrupt = 0
 as3935LightningCount = 0
@@ -155,6 +162,9 @@ as3935LastDistance = 0
 as3935LastStatus = ""
 
 as3935Interrupt = False
+# turn I2CBus 0 on
+tca9545.write_control_register(TCA9545_CONFIG_BUS0)
+time.sleep(0.003)
 
 def process_as3935_interrupt():
 
@@ -165,7 +175,9 @@ def process_as3935_interrupt():
 
     print "processing Interrupt from as3935"
     # turn I2CBus 0 on
-    tca9545.write_control_register(TCA9545_CONFIG_BUS0)
+    #tca9545.write_control_register(TCA9545_CONFIG_BUS0)
+    # turn I2CBus 2 on
+    tca9545.write_control_register(TCA9545_CONFIG_BUS2)
     time.sleep(0.003)
     reason = as3935.get_interrupt()
 
@@ -184,8 +196,11 @@ def process_as3935_interrupt():
         distance = as3935.get_distance()
 	as3935LastDistance = distance
 	as3935LastStatus = "Lightning Detected "  + str(distance) + "km away. (%s)" % now
+	pclogging.log(pclogging.INFO, __name__, "Lightning Detected "  + str(distance) + "km away. (%s)" % now)
+	sendemail.sendEmail("test", "WeatherPi Lightning Detected\n", as3935LastStatus, conf.textnotifyAddress,  conf.textfromAddress, "");
     
     print "Last Interrupt = 0x%x:  %s" % (as3935LastInterrupt, as3935LastStatus)
+    tca9545.write_control_register(TCA9545_CONFIG_BUS0)
 
     time.sleep(0.003)
 
@@ -199,9 +214,11 @@ def handle_as3935_interrupt(channel):
     as3935Interrupt = True
 
 
-as3935pin = 18
+#as3935pin = 18
+as3935pin = 22 
 
 GPIO.setup(as3935pin, GPIO.IN)
+#GPIO.setup(as3935pin, GPIO.IN,pull_up_down=GPIO.PUD_UP)
 GPIO.add_event_detect(as3935pin, GPIO.RISING, callback=handle_as3935_interrupt)
 
 
@@ -247,7 +264,7 @@ def processCommand():
 		return False
 
 	# Check for our commands
-	pclogging.log(pclogging.INFO, __name__, "Command %s Recieved" % command)
+	#pclogging.log(pclogging.INFO, __name__, "Command %s Recieved" % command)
 
 	print "Processing Command: ", command
 	if (command == "SAMPLEWEATHER"):
@@ -767,15 +784,66 @@ def blinkSunAirLED2X(howmany):
 	i = i +1
 
 
+
+import urllib2 
+
+
+def checkInternetConnection():
+    try:
+        urllib2.urlopen("http://www.google.com").close()
+    except urllib2.URLError:
+        print "Internet Not Connected"
+        time.sleep(1)
+	return false
+    else:
+        print "Internet Connected"
+	return true
+
+
+WLAN_check_flg = 0
+
+def WLAN_check():
+        '''
+        This function checks if the WLAN is still up by pinging the router.
+        If there is no return, we'll reset the WLAN connection.
+        If the resetting of the WLAN does not work, we need to reset the Pi.
+        source http://www.raspberrypi.org/forums/viewtopic.php?t=54001&p=413095
+        '''
+	global WLAN_check_flg
+        ping_ret = subprocess.call(['ping -c 2 -w 1 -q 192.168.1.1 |grep "1 received" > /dev/null 2> /dev/null'], shell=True)
+	if ping_ret:
+            # we lost the WLAN connection.
+            # did we try a recovery already?
+            if (WLAN_check_flg>2):
+                # we have a serious problem and need to reboot the Pi to recover the WLAN connection
+		print "logger WLAN Down, Pi is forcing a reboot"
+   		pclogging.log(pclogging.ERROR, __name__, "WLAN Down, Pi is forcing a reboot")
+                WLAN_check_flg = 0 
+		rebootPi("WLAN Down")
+                #subprocess.call(['sudo shutdown -r now'], shell=True)
+            else:
+                # try to recover the connection by resetting the LAN
+                #subprocess.call(['logger "WLAN is down, Pi is resetting WLAN connection"'], shell=True)
+		print "WLAN Down, Pi is trying resetting WLAN connection"
+   		pclogging.log(pclogging.WARNING, __name__, "WLAN Down, Pi is resetting WLAN connection" )
+                WLAN_check_flg = WLAN_check_flg + 1 # try to recover
+                subprocess.call(['sudo /sbin/ifdown wlan0 && sleep 10 && sudo /sbin/ifup --force wlan0'], shell=True)
+        else:
+            WLAN_check_flg = 0
+	    print "WLAN is OK"
+
+
+
+
 print ""
-print "WeatherPi Solar Powered Weather Station Version 1.6 - SwitchDoc Labs"
+print "WeatherPi Solar Powered Weather Station Version 1.9 - SwitchDoc Labs"
 print ""
 print ""
 print "Program Started at:"+ time.strftime("%Y-%m-%d %H:%M:%S")
 print ""
 
 DATABASEPASSWORD = "rmysqlpassword"
-pclogging.log(pclogging.INFO, __name__, "WeatherPi Startup Version 1.6")
+pclogging.log(pclogging.INFO, __name__, "WeatherPi Startup Version 1.9")
 
 sendemail.sendEmail("test", "WeatherPi Startup \n", "The WeatherPi Raspberry Pi has rebooted.", conf.notifyAddress,  conf.fromAddress, "");
 
@@ -788,9 +856,16 @@ while True:
 	# process Interrupts from Lightning
 
 	if (as3935Interrupt == True):
-		process_as3935_interrupt()
+
+		try:
+			process_as3935_interrupt()
+
+			
+		except:
+			print "exception - as3935 I2C did not work"
 
 
+ 	tca9545.write_control_register(TCA9545_CONFIG_BUS0)
 	# process commands from RasPiConnect
 	print "---------------------------------------- "
 
@@ -828,6 +903,13 @@ while True:
                 sampleSunAirPlus()
 		doAllGraphs.doAllGraphs()
 
+	# every 30 minutes, check wifi connections 
+
+	if ((secondCount % (30*60)) == 0):
+		# print every 900 seconds
+    		WLAN_check()
+
+    	#WLAN_check()
 
 
 	# every 48 hours, reboot
